@@ -35,3 +35,13 @@ rpart.plot::rpart.plot(model1)
 rpart::rsq.rpart(model1)
 ```
 
+```{r}
+fit1 <- lm(bwt ~ ., data = birthweight)
+step <- MASS::stepAIC(fit1)
+selectedmodel <- step(fit1)
+```
+
+```{r}
+summary(selectedmodel)
+```
+
