@@ -2,7 +2,7 @@
 title: "p8105_hw6_jsg2145"
 author: "Jared Garfinkel"
 date: "11/19/2019"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
@@ -35,8 +35,66 @@ birthweight <- read_csv("./birthweight.csv") %>%
          )
 ```
 
+```{r, results = "hide"}
+birthweight %>% 
+  ggplot(aes(x = bwt)) +
+  geom_histogram()
+```
+
 ```{r}
+fit <- lm(bwt ~ ., data = birthweight)
+```
+
+```{r, results = "hide"}
+alias(fit)
+```
+
+```{r}
+fit1 <- lm(bwt ~ . -pnumlbw -pnumsga -wtgain, data = birthweight)
+```
+
+```{r, results = "hide"}
+car::vif(fit1)
+```
+
+```{r}
+fit2 <-lm(bwt ~ . -pnumlbw -pnumsga -wtgain -frace -ppwt -mheight, data = birthweight)
+```
+
+```{r, results = "hide"}
+car::vif(fit2)
+```
+
+
+```{r, results = "hide"}
+selectedmodel <- step(fit2)
+```
+
+```{r}
+summary(selectedmodel)
+```
+
+I looked at spread of the birthweight variable and used a skim function to view the spread of other 
+
+variables. Then I created a model using all the available variables and tested for aliased variables 
+
+or variables that did not include additional information in the dataframe and removed them. 
+
+Then I checked for variance inflation factors.
+
+I removed selected terms with VIFs greater than 10 until there were no VIFs greater than 10. 
+
+Then I ran the remaining variables through stepwise regression and selected the final model with the
+
+lowest AIC.
+
+```{r}
+set.seed(1)
+
 cross_df <- crossv_mc(birthweight, 100)
+```
+
+```{r}
 cross_df <- cross_df %>% 
   mutate(
     train = map(train, as_tibble),
@@ -45,10 +103,13 @@ cross_df <- cross_df %>%
 
 ```{r}
 cross_results <- cross_df %>% 
-  mutate(linear_mod  = map(train, ~lm(bwt ~ ., data = .x)),
-         linear_mod_s = map(train, ~lm(bwt ~ . -pnumlbw -pnumsga -wtgain -ppwt -mheight, data = birthweight)),
-         rmse_linear = map2_dbl(.x = linear_mod, .y = test, ~rmse(.x, .y)),
-         rmse_linear_s = map2_dbl(.x = linear_mod_s, .y = test, ~rmse(.x, .y)))
+  mutate(linear_1  = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+         linear_mod_s = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + fincome + 
+    gaweeks + mrace + parity + ppbmi + smoken, data = .x)),
+         linear_2 = map(train, ~lm(bwt ~ bhead + blength + babysex + bhead * blength * babysex + bhead * blength + bhead * babysex + blength * babysex, data = .x)),
+         rmse_linear_1 = map2_dbl(.x = linear_1, .y = test, ~rmse(.x, .y)),
+         rmse_linear_s = map2_dbl(.x = linear_mod_s, .y = test, ~rmse(.x, .y)),
+         rmse_linear_2 = map2_dbl(.x = linear_2, .y = test, ~rmse(.x, .y)))
 ```
 
 ```{r}
@@ -60,100 +121,80 @@ cross_results %>%
     values_to = "rmse",
     names_prefix = "rmse_") %>% 
   mutate(model = fct_inorder(model)) %>% 
-  ggplot(aes(x = model, y = rmse)) + geom_violin()
+  ggplot(aes(x = model, y = rmse)) + 
+  geom_violin()
 ```
+
+Compared to two other models, my model had a lower RMSE. However, when looking for an "optimal"
+
+model, it may be appropriate to choose a parsimonious model rather than a more complex model.
+
 ```{r}
-birthweight_df =
-  birthweight %>% 
-  mutate(bwt_low = (bwt > 2500) * (bwt - 2500))
+birthweight <- birthweight %>% 
+  add_predictions(selectedmodel) %>% 
+  add_residuals(selectedmodel)
 ```
 
 ```{r}
-pwl_mod = lm(bwt + bwt_low ~ . -pnumlbw -pnumsga -wtgain -ppwt -mheight, data = birthweight_df)
-linear_mod = lm(bwt ~ . -pnumlbw -pnumsga -wtgain -ppwt -mheight, data = birthweight_df)
-
+birthweight %>%
+  ggplot(aes(x=pred, y=resid)) + 
+  geom_point()
 ```
 
-```{r}
-pwl_df =
-  crossv_mc(birthweight_df, 100) %>% 
+
+
+## Problem 2
+
+```{r, cache = TRUE}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
   mutate(
-    train = map(train, as_tibble),
-    test = map(test, as_tibble))
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+```{r, results = "hide"}
+set.seed(1)
+
+boot_df <- weather_df %>% 
+  bootstrap(n = 100) %>% 
+  mutate(
+    models = map(strap, ~lm(tmax ~ tmin, data = .x) ),
+    results = map(models, broom::glance),
+    tidyresults = map(models, broom::tidy))
 ```
 
 ```{r}
-pwl_df = 
-  pwl_df %>% 
-  mutate(linear_mod  = map(train, ~lm(bwt ~ . -pnumlbw -pnumsga -wtgain -ppwt -mheight, data = .x)),
-         pwl_mod     = map(train, ~lm(bwt + bwt_low ~ . -pnumlbw -pnumsga -wtgain -ppwt -mheight, data = .x)),
-         rmse_linear = map2_dbl(linear_mod, test, ~rmse(model = .x, data = .y)),
-         rmse_pwl    = map2_dbl(pwl_mod, test, ~rmse(model = .x, data = .y)))
-```
-
-```{r, eval = FALSE}
-pwl_df %>%
-  gather_predictions(linear_mod, pwl_mod) %>% 
-  mutate(model = fct_inorder(model)) %>% 
-  ggplot(aes(x = babysex, y = bwt)) + 
-  geom_point(alpha = .5) +
-  geom_line(aes(y = pred), color = "red") + 
-  facet_grid(~model)
-```
-
-
-```{r}
-pwl_df %>% 
-  select(starts_with("rmse")) %>% 
-pivot_longer(
-    everything(),
-    names_to = "model", 
-    values_to = "rmse",
-    names_prefix = "rmse_") %>% 
-  mutate(model = fct_inorder(model)) %>% 
-  ggplot(aes(x = model, y = rmse)) + geom_violin()
-```
-
-
-```{r}
-model1 <- rpart::rpart(bwt ~ ., data = birthweight)
-rpart.plot::rpart.plot(model1)
-rpart::rsq.rpart(model1)
-```
-
-```{r}
-fit1 <- lm(bwt ~ . -pnumlbw -pnumsga -wtgain -ppwt -mheight, data = birthweight)
-fit_mod <- lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + 
-    momage + mrace + parity + smoken, data = birthweight)
-step <- MASS::stepAIC(fit1)
-selectedmodel <- step(fit1)
-```
-
-```{r}
-alias(fit1)
-```
-
-
-```{r}
-car::vif(fit1)
-```
-
-
-```{r}
-summary(selectedmodel)
-```
-
-```{r}
-birthweight %>% 
-  ggplot(aes(x = babysex + bhead + blength + delwt + fincome + gaweeks + 
-    momage + mrace + parity + smoken, y = bwt)) +
-  geom_point() +
-  geom_smooth(method = "lm", se = FALSE)
-```
-
-```{r}
-birthweight %>% 
-  ggplot(aes(x= bwt)) +
+boot_df %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  ggplot(aes(x = r.squared)) +
   geom_histogram()
 ```
 
+The 95% confidence interval of the r-squared estimates is (`r round(quantile(pull(unnest(boot_df, results), r.squared),.025), digits = 2)`, `r round(quantile(pull(unnest(boot_df, results), r.squared),.975), digits = 2)`).
+
+```{r, results = "hide"}
+boot_df %>% 
+  select(-strap, -models) %>% 
+  unnest(tidyresults) %>% 
+  select(.id, term, estimate) %>% 
+  pivot_wider(names_from = term,
+              values_from = estimate) %>% 
+  janitor::clean_names() %>% 
+  mutate(logpred = log(intercept*tmin)) %>% 
+  ggplot(aes(x = logpred)) +
+  geom_histogram()
+```
+
+The 95% confidence interval of the log of the product of $\hat{\beta_0}$ and $\hat{\beta_1}$ is (`r round(quantile(log(pull(filter(unnest(boot_df, tidyresults), term == "(Intercept)"), estimate)*pull(filter(unnest(boot_df, tidyresults), term == "tmin"), estimate)), .025), digits = 2)`, `r round(quantile(log(pull(filter(unnest(boot_df, tidyresults), term == "(Intercept)"), estimate)*pull(filter(unnest(boot_df, tidyresults), term == "tmin"), estimate)), .975), digits = 2)`)
+
+The distribution of the r-squared and logs of the products are fairly normal, as would be expected
+
+from a large sample size, since our sample data was bootstrapped 5000 times.
