@@ -163,7 +163,7 @@ weather_df =
 set.seed(1)
 
 boot_df <- weather_df %>% 
-  bootstrap(n = 100) %>% 
+  bootstrap(n = 5000) %>% 
   mutate(
     models = map(strap, ~lm(tmax ~ tmin, data = .x) ),
     results = map(models, broom::glance),
